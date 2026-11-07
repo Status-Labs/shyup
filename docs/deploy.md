@@ -15,12 +15,24 @@ cp /opt/shyup/deploy/shyup.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now shyup
 ```
 
-Make tokens and projects (as the service user, so the DB stays owned by it):
+Email settings go in `/etc/shyup.env` (readable by root only; systemd loads it):
+
+```sh
+SHYUP_BASE_URL=https://tasks.example.com
+SHYUP_WEMAIL_API_KEY=wm_...
+SHYUP_WEMAIL_INBOX_ID=ibx_...
+```
+
+Without them, sign-in links go to the service log (`journalctl -u shyup`), which works if you're the only user.
+
+Add people, agents and projects (as the service user, so the DB stays owned by it):
 
 ```sh
 cd /opt/shyup
-sudo -u shyup SHYUP_DB=/var/lib/shyup/shyup.db node src/cli.ts token create ben
-sudo -u shyup SHYUP_DB=/var/lib/shyup/shyup.db node src/cli.ts project create WEM "WeMail"
+alias shyup="sudo -u shyup SHYUP_DB=/var/lib/shyup/shyup.db node src/cli.ts"
+shyup user add ben ben@example.com      # signs in to the board by email
+shyup token create claude@wemail        # an agent's API/MCP token
+shyup project create WEM "WeMail"
 ```
 
 HTTPS with [Caddy](https://caddyserver.com) (gets certificates automatically). `/etc/caddy/Caddyfile`:
@@ -37,8 +49,8 @@ Upgrade: `cd /opt/shyup && git pull && systemctl restart shyup`. Migrations run 
 
 ```sh
 docker build -t shyup .
-docker run -d --name shyup -p 127.0.0.1:4000:4000 -v shyup-data:/data shyup
-docker exec shyup node src/cli.ts token create ben
+docker run -d --name shyup -p 127.0.0.1:4000:4000 -v shyup-data:/data --env-file shyup.env shyup
+docker exec shyup node src/cli.ts user add ben ben@example.com
 ```
 
 Put a reverse proxy with HTTPS in front, as above.
@@ -58,3 +70,4 @@ Copy that file somewhere off the box (S3, B2, another server). Restore by stoppi
 - Always serve over HTTPS: tokens travel in headers and cookies.
 - Keep `HOST=127.0.0.1` behind the proxy so the plain-HTTP port isn't public.
 - Lost or leaked token: `node src/cli.ts token revoke <name>`, then create a new one.
+- Someone leaving: `node src/cli.ts user remove <name>` signs them out everywhere.
