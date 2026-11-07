@@ -1,0 +1,22 @@
+{
+  "name": "shyup",
+  "version": "0.1.0",
+  "description": "A small task manager for humans and AI agents. REST API, CLI and MCP server on one SQLite file.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@12.14.0",
+  "engines": { "node": ">=24" },
+  "bin": { "shyup": "src/cli.ts" },
+  "scripts": {
+    "start": "node src/cli.ts serve",
+    "dev": "node --watch src/cli.ts serve",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
