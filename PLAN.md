@@ -24,7 +24,7 @@ A task manager for a company where AI agents do much of the work. Simpler than J
 ## Phase 2 — Use it for real
 
 1. [x] Humans sign in to the board with an emailed link (sent through WeMail, or printed to the log). Agents keep tokens.
-2. [ ] Deploy our instance at `shyup.statuslabs.dev` on a cheap VPS (provider TBD), sign-in email from a WeMail inbox, then move Status Labs work into it (projects from Weeoh's `software/manifest.yaml`).
+2. [ ] Deploy our instance at `shyup.statuslabs.dev` on a small DigitalOcean droplet, sign-in email from a WeMail inbox, then move Status Labs work into it (projects from Weeoh's `software/manifest.yaml`).
 3. [ ] Connect our agents over MCP. They run on Convoy VMs, which get Shyup's URL, token and MCP setup (Convoy PLAN, Stage 1b).
 4. [ ] Nightly SQLite backup (`sqlite3 .backup` or `VACUUM INTO`) to object storage, and a restore test.
 5. [ ] Write down what hurts after two weeks of use; that list drives Phase 3.
