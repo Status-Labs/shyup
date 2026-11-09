@@ -8,6 +8,7 @@ WorkingDirectory=/opt/shyup
 Environment=SHYUP_DB=/var/lib/shyup/shyup.db
 Environment=PORT=4000
 Environment=HOST=127.0.0.1
+EnvironmentFile=-/etc/shyup.env
 ExecStart=/usr/bin/env node src/cli.ts serve
 Restart=on-failure
 NoNewPrivileges=true

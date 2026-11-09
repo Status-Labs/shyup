@@ -4,6 +4,8 @@ import { openDatabase } from "./db.ts";
 import { startServer } from "./server.ts";
 import { InputError, createProject, type Task, type TaskDetail } from "./tasks.ts";
 import { createToken, listTokens, revokeToken } from "./tokens.ts";
+import { addUser, listUsers, removeUser } from "./users.ts";
+import { mailConfigFromEnv } from "./mail.ts";
 
 const help = `shyup: a small task manager for humans and AI agents
 
@@ -13,6 +15,9 @@ Server (run on the machine with the database):
   shyup token list
   shyup token revoke <name>
   shyup project create <KEY> <name> [--description text]
+  shyup user add <name> <email>         Let someone sign in to the web board by email
+  shyup user list
+  shyup user remove <name>
 
 Client (needs SHYUP_URL and SHYUP_TOKEN):
   shyup projects
@@ -50,6 +55,8 @@ async function main(argv: string[]): Promise<void> {
       return serve();
     case "token":
       return token(rest);
+    case "user":
+      return user(rest);
     case "project":
       return project(rest, values.description);
     case "projects": {
@@ -114,13 +121,18 @@ function databasePath(): string {
 }
 
 async function serve(): Promise<void> {
+  const mail = mailConfigFromEnv(process.env);
+  const baseUrl = process.env.SHYUP_BASE_URL?.replace(/\/$/, "") || null;
+  // Emailed links must not be built from the request's Host header, which a client controls.
+  if (mail && !baseUrl) throw new InputError("Set SHYUP_BASE_URL (e.g. https://tasks.example.com) when sending email.");
   const db = openDatabase(databasePath());
   const port = Number(process.env.PORT ?? 4000);
   const host = process.env.HOST ?? "127.0.0.1";
-  const server = await startServer(db, port, host);
+  const server = await startServer(db, { port, host, baseUrl, mail });
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
   console.log(`Shyup listening on http://${host}:${actualPort} (database: ${databasePath()})`);
+  if (!mail) console.log("Email isn't configured: sign-in links are printed here.");
   const stop = () => server.close(() => (db.close(), process.exit(0)));
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
@@ -141,6 +153,21 @@ function token([action, name]: string[]): void {
     console.log(`Revoked ${name}.`);
   } else {
     throw new InputError("Usage: shyup token create|list|revoke <name>");
+  }
+}
+
+function user([action, name, email]: string[]): void {
+  const db = openDatabase(databasePath());
+  if (action === "add") {
+    const added = addUser(db, need(name, "name"), need(email, "email"));
+    console.log(`Added ${added.name} <${added.email}>. They can sign in at /login.`);
+  } else if (action === "list") {
+    for (const u of listUsers(db)) console.log(`${u.name.padEnd(24)} ${u.email}`);
+  } else if (action === "remove") {
+    removeUser(db, need(name, "name"));
+    console.log(`Removed ${name} and signed them out.`);
+  } else {
+    throw new InputError("Usage: shyup user add <name> <email> | list | remove <name>");
   }
 }
 

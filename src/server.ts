@@ -13,10 +13,12 @@ import {
   updateTask,
 } from "./tasks.ts";
 import { authenticate } from "./tokens.ts";
-import { boardPage, loginPage, notFoundPage, taskPage } from "./ui.ts";
+import { boardPage, loginPage, notFoundPage, signInPage, taskPage } from "./ui.ts";
+import { sendLoginEmail, type MailConfig } from "./mail.ts";
+import { createLoginLink, endSession, redeemLoginLink, sessionMaxAgeSeconds, sessionUser } from "./users.ts";
 
 const maxBodyBytes = 1_000_000;
-const cookieName = "shyup_token";
+const cookieName = "shyup_session";
 
 class HttpError extends Error {
   readonly status: number;
@@ -26,9 +28,18 @@ class HttpError extends Error {
   }
 }
 
-export function startServer(db: DatabaseSync, port: number, host = "127.0.0.1"): Promise<Server> {
+export type ServerConfig = {
+  port: number;
+  host: string;
+  /** Public URL used in emailed sign-in links. Without it, links use the request's Host header (fine locally). */
+  baseUrl: string | null;
+  mail: MailConfig;
+};
+
+export function startServer(db: DatabaseSync, config: ServerConfig): Promise<Server> {
+  const { port, host } = config;
   const server = createServer((req, res) => {
-    handle(db, req, res).catch((error: unknown) => {
+    handle(db, config, req, res).catch((error: unknown) => {
       const status = statusFor(error);
       if (status === 500) console.error(error);
       if (!res.headersSent) sendJson(res, status, { error: status === 500 ? "Internal error" : (error as Error).message });
@@ -45,7 +56,7 @@ function statusFor(error: unknown): number {
   return 500;
 }
 
-async function handle(db: DatabaseSync, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handle(db: DatabaseSync, config: ServerConfig, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
   const method = req.method ?? "GET";
@@ -64,7 +75,7 @@ async function handle(db: DatabaseSync, req: IncomingMessage, res: ServerRespons
   }
 
   if (path.startsWith("/api/")) return handleApi(db, req, res, method, path, url);
-  return handleUi(db, req, res, method, path, url);
+  return handleUi(db, config, req, res, method, path, url);
 }
 
 // ---- REST API ---------------------------------------------------------------
@@ -110,6 +121,7 @@ async function handleApi(
 
 async function handleUi(
   db: DatabaseSync,
+  config: ServerConfig,
   req: IncomingMessage,
   res: ServerResponse,
   method: string,
@@ -118,13 +130,42 @@ async function handleUi(
 ): Promise<void> {
   if (path === "/login" && method === "GET") return sendHtml(res, 200, loginPage());
   if (path === "/login" && method === "POST") {
-    const token = (await readForm(req)).get("token")?.trim() ?? "";
-    if (!authenticate(db, token)) return sendHtml(res, 401, loginPage("That token isn't valid."));
-    const secure = req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
-    res.setHeader("Set-Cookie", `${cookieName}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000${secure}`);
+    if (!sameOrigin(req)) throw new HttpError(403, "Cross-origin request refused");
+    const email = (await readForm(req)).get("email") ?? "";
+    const link = createLoginLink(db, email);
+    if (link) {
+      const base = config.baseUrl ?? `http://${req.headers.host}`;
+      const signInUrl = `${base}/login/verify?token=${encodeURIComponent(link.secret)}`;
+      try {
+        await sendLoginEmail(config.mail, link.email, signInUrl);
+      } catch (error) {
+        console.error(error);
+        return sendHtml(res, 502, loginPage({ error: "We couldn't send the email just now. Try again in a minute." }));
+      }
+    }
+    // Same answer whether or not the address has an account.
+    return sendHtml(res, 200, loginPage({ sent: true }));
+  }
+  // The emailed link opens a page with a button, so mail scanners that prefetch links can't use it up.
+  if (path === "/login/verify" && method === "GET") {
+    return sendHtml(res, 200, signInPage(url.searchParams.get("token") ?? ""));
+  }
+  if (path === "/login/verify" && method === "POST") {
+    if (!sameOrigin(req)) throw new HttpError(403, "Cross-origin request refused");
+    const session = redeemLoginLink(db, (await readForm(req)).get("token") ?? "");
+    if (!session) {
+      return sendHtml(res, 400, loginPage({ error: "That link has expired or was already used. Ask for a new one." }));
+    }
+    const secure = (config.baseUrl ?? "").startsWith("https:") || req.headers["x-forwarded-proto"] === "https";
+    res.setHeader(
+      "Set-Cookie",
+      `${cookieName}=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sessionMaxAgeSeconds}${secure ? "; Secure" : ""}`,
+    );
     return redirect(res, "/");
   }
   if (path === "/logout") {
+    const session = readCookie(req);
+    if (session) endSession(db, session);
     res.setHeader("Set-Cookie", `${cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
     return redirect(res, "/login");
   }
@@ -191,10 +232,14 @@ function requireBearer(db: DatabaseSync, req: IncomingMessage): string {
   return actor;
 }
 
+function readCookie(req: IncomingMessage): string | null {
+  const match = new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`).exec(req.headers.cookie ?? "");
+  return match ? match[1]! : null;
+}
+
 function cookieActor(db: DatabaseSync, req: IncomingMessage): string | null {
-  const cookies = req.headers.cookie ?? "";
-  const match = new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`).exec(cookies);
-  return match ? authenticate(db, match[1]!) : null;
+  const session = readCookie(req);
+  return session ? sessionUser(db, session) : null;
 }
 
 function sameOrigin(req: IncomingMessage): boolean {

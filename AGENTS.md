@@ -4,9 +4,9 @@ Shyup: a small task manager for humans and AI agents. REST API, CLI, MCP server 
 
 ## Company context
 
-This is a Status Labs product. Before starting, read Weeoh, the company brain:
-https://github.com/Status-Labs/weeoh (start with its `AGENTS.md`). If it's checked out locally, it's at `../weeoh`.
-Track your work in Shyup under project `SHY`.
+This is a Status Labs product. Status Labs team members and agents: before starting, read Weeoh, the company brain, at https://github.com/Status-Labs/weeoh (private; start with its `AGENTS.md`). If it's checked out locally, it's at `../weeoh`. Track your work in Shyup under project `SHY`.
+
+Outside contributors can skip this; everything you need is in this repo.
 
 ## Keep it simple
 
@@ -24,7 +24,9 @@ Track your work in Shyup under project `SHY`.
 | `src/tasks.ts` | Projects, tasks, comments, history. All validation lives here |
 | `src/mcp.ts` | MCP tools: thin wrappers over `tasks.ts` |
 | `src/ui.ts` | Server-rendered HTML. No client JavaScript |
-| `src/tokens.ts` | Token create, check, revoke. Only hashes are stored |
+| `src/tokens.ts` | Agent tokens for the API and MCP: create, check, revoke. Only hashes are stored |
+| `src/users.ts` | People, emailed sign-in links and web sessions. Only hashes are stored |
+| `src/mail.ts` | Sends sign-in emails through WeMail, or prints the link when email isn't set up |
 | `src/db.ts` | Open SQLite and run migrations |
 
 ## Rules
