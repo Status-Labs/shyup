@@ -10,22 +10,29 @@ export type Harness = {
   url: string;
   token: string;
   run: (...args: string[]) => string;
+  admin: (...args: string[]) => string;
+  log: () => string;
   request: (method: string, path: string, body?: unknown) => Promise<{ status: number; data: any }>;
   stop: () => void;
 };
 
-export async function startHarness(): Promise<Harness> {
+export async function startHarness(extraEnv: Record<string, string> = {}): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), "shyup-test-"));
-  const env = { ...process.env, SHYUP_DB: join(dir, "test.db"), PORT: "0", HOST: "127.0.0.1" };
+  const env = { ...cleanEnv(), SHYUP_DB: join(dir, "test.db"), PORT: "0", HOST: "127.0.0.1", ...extraEnv };
   const runLocal = (...args: string[]) => execFileSync("node", [cli, ...args], { env, encoding: "utf8" });
 
   const token = runLocal("token", "create", "tester").trim().split("\n").at(-1)!;
   const server = spawn("node", [cli, "serve"], { env });
+  let log = "";
+  server.stdout!.on("data", (chunk: Buffer) => (log += chunk.toString()));
+  server.stderr!.on("data", (chunk: Buffer) => (log += chunk.toString()));
   const url = await waitForUrl(server);
 
   return {
     url,
     token,
+    admin: runLocal,
+    log: () => log,
     run: (...args) =>
       execFileSync("node", [cli, ...args], {
         env: { ...env, SHYUP_URL: url, SHYUP_TOKEN: token },
@@ -45,6 +52,11 @@ export async function startHarness(): Promise<Harness> {
       rmSync(dir, { recursive: true, force: true });
     },
   };
+}
+
+// Never let a developer's real Shyup or WeMail settings leak into tests.
+function cleanEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("SHYUP_")));
 }
 
 function waitForUrl(server: ChildProcess): Promise<string> {

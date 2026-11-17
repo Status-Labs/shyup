@@ -69,16 +69,29 @@ function options(values: readonly string[], selected: string): string {
   return values.map((v) => `<option${v === selected ? " selected" : ""}>${e(v)}</option>`).join("");
 }
 
-export function loginPage(error?: string): string {
+export function loginPage(state: { sent?: boolean; error?: string } = {}): string {
+  const content = state.sent
+    ? `<h1>Check your email</h1>
+       <p>If that address has an account, a sign-in link is on its way. It works once and expires in 15 minutes.</p>
+       <p><a href="/login">Use a different address</a></p>`
+    : `<h1>Sign in</h1>
+       <p class="muted">We'll email you a link. No password needed.</p>
+       ${state.error ? `<div class="error" role="alert">${e(state.error)}</div>` : ""}
+       <form method="post" action="/login">
+         <label>Email <input name="email" type="email" autocomplete="email" required></label>
+         <button>Email me a link</button>
+       </form>
+       <p class="muted">No account? Ask an admin to run <code>shyup user add &lt;name&gt; &lt;email&gt;</code>.</p>`;
+  return page("Sign in", `<div class="box" style="max-width:420px">${content}</div>`);
+}
+
+export function signInPage(token: string): string {
   return page(
     "Sign in",
-    `<div class="box" style="max-width:420px">
-      <h1>Sign in</h1>
-      <p class="muted">Paste your Shyup token. Ask an admin to run <code>shyup token create &lt;your-name&gt;</code>.</p>
-      ${error ? `<div class="error" role="alert">${e(error)}</div>` : ""}
-      <form method="post" action="/login">
-        <label>Token <input name="token" type="password" autocomplete="current-password" required></label>
-        <button>Sign in</button>
+    `<div class="box" style="max-width:420px"><h1>Almost in</h1>
+      <form method="post" action="/login/verify">
+        <input type="hidden" name="token" value="${e(token)}">
+        <button>Sign in to Shyup</button>
       </form></div>`,
   );
 }

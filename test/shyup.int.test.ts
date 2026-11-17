@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { startHarness, type Harness } from "./harness.ts";
 
 let app: Harness;
@@ -85,17 +87,65 @@ describe("CLI", () => {
 });
 
 describe("web UI", () => {
-  test("sends signed-out visitors to the login page and shows the board after login", async () => {
+  async function requestLink(email: string) {
+    const response = await fetch(`${app.url}/login`, { method: "POST", body: new URLSearchParams({ email }) });
+    return { status: response.status, html: await response.text() };
+  }
+
+  test("signs in with an emailed link that works once", async () => {
+    app.admin("user", "add", "ada", "Ada@Example.com");
     const signedOut = await fetch(app.url, { redirect: "manual" });
     expect(signedOut.headers.get("location")).toBe("/login");
 
-    const login = await fetch(`${app.url}/login`, {
-      method: "POST",
-      body: new URLSearchParams({ token: app.token }),
-      redirect: "manual",
-    });
-    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    expect((await requestLink("ada@example.com")).html).toContain("Check your email");
+    const link = /Sign-in link for ada@example.com: (\S+)/.exec(app.log())![1]!;
+    const token = new URL(link).searchParams.get("token")!;
+
+    // Opening the link alone (as a mail scanner would) doesn't use it up.
+    expect((await fetch(link)).status).toBe(200);
+    const signIn = () =>
+      fetch(`${app.url}/login/verify`, { method: "POST", body: new URLSearchParams({ token }), redirect: "manual" });
+    const first = await signIn();
+    const cookie = first.headers.get("set-cookie")!.split(";")[0]!;
     const board = await (await fetch(app.url, { headers: { cookie } })).text();
-    expect(board).toContain("Bounce handling");
+    expect(board).toContain("Signed in as ada");
+    expect((await signIn()).status).toBe(400);
+  });
+
+  test("answers the same for unknown addresses and sends nothing", async () => {
+    const before = app.log();
+    expect((await requestLink("nobody@example.com")).html).toContain("Check your email");
+    expect(app.log()).toBe(before);
+  });
+});
+
+describe("sign-in email through WeMail", () => {
+  test("sends the link with the configured inbox and base URL", async () => {
+    const sent: { auth: string | undefined; body: Record<string, string> }[] = [];
+    const fakeWemail = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      sent.push({ auth: req.headers.authorization, body: JSON.parse(raw) });
+      res.writeHead(201, { "Content-Type": "application/json" }).end('{"id":"msg_1"}');
+    });
+    await new Promise<void>((resolve) => fakeWemail.listen(0, "127.0.0.1", resolve));
+    const { port } = fakeWemail.address() as AddressInfo;
+    const mailed = await startHarness({
+      SHYUP_BASE_URL: "https://tasks.example.com",
+      SHYUP_WEMAIL_URL: `http://127.0.0.1:${port}`,
+      SHYUP_WEMAIL_API_KEY: "wm_test",
+      SHYUP_WEMAIL_INBOX_ID: "ibx_1",
+    });
+    try {
+      mailed.admin("user", "add", "ben", "ben@example.com");
+      await fetch(`${mailed.url}/login`, { method: "POST", body: new URLSearchParams({ email: "ben@example.com" }) });
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.auth).toBe("Bearer wm_test");
+      expect(sent[0]!.body).toMatchObject({ inbox_id: "ibx_1", to: "ben@example.com" });
+      expect(sent[0]!.body.text).toContain("https://tasks.example.com/login/verify?token=");
+    } finally {
+      mailed.stop();
+      fakeWemail.close();
+    }
   });
 });
